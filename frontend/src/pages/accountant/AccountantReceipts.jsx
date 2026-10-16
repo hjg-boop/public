@@ -2,8 +2,7 @@ import React, { useEffect, useState } from "react";
 import DashboardLayout from "../../layouts/DashboardLayout";
 import api, { apiErrorMessage, openReceipt } from "../../services/api";
 import { useToast } from "../../context/ToastContext";
-
-const money = (n) => `\u20B9${Number(n || 0).toLocaleString("en-IN")}`;
+import ReceiptCard from "../../components/ReceiptCard";
 
 // Same records as Payment History, laid out as receipts to re-open or print.
 const AccountantReceipts = () => {
@@ -29,15 +28,14 @@ const AccountantReceipts = () => {
       <div className="page-header"><div><h2>Receipts</h2></div></div>
       <div className="toolbar"><input placeholder="Search by receipt no, student name or roll number..." value={search} onChange={(e) => setSearch(e.target.value)} /></div>
       {loading ? <div className="loading-state"><span className="spinner" /></div> : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 14 }}>
+        <div className="receipt-list">
           {payments.map((p) => (
-            <div key={p._id} className="card" style={{ padding: 16 }}>
-              <div style={{ fontWeight: 600 }}>{p.receiptNumber}</div>
-              <div style={{ fontSize: 13.5 }}>{p.student?.user?.name} ({p.student?.rollNumber})</div>
-              <div style={{ fontSize: 13.5, color: "var(--grey-700)" }}>{p.feeHeadLabel} - {money(p.amount)}</div>
-              <div style={{ fontSize: 12, color: "var(--grey-700)" }}>{new Date(p.paymentDate).toLocaleDateString()}</div>
-              <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 8 }} onClick={() => openReceipt(p._id).catch((err) => showToast(apiErrorMessage(err), "error"))}>View / Print</button>
-            </div>
+            <ReceiptCard
+              key={p._id}
+              payment={p}
+              showStudent
+              onOpen={() => openReceipt(p._id).catch((err) => showToast(apiErrorMessage(err), "error"))}
+            />
           ))}
           {payments.length === 0 && <p>No receipts found.</p>}
         </div>

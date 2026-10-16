@@ -37,12 +37,22 @@ const StudentDashboard = () => {
 
   return (
     <DashboardLayout title="Dashboard">
-      <div className="page-header">
+      <section className="portal-welcome student-welcome">
         <div>
-          <h2>Welcome back, {user.name.split(" ")[0]}</h2>
-          <p>Here's what's happening in your branch this week.</p>
+          <span className="portal-eyebrow">Student portal</span>
+          <h2>Hi, {user.name.split(" ")[0]} <span aria-hidden="true">👋</span></h2>
+          <p>Here’s your academic snapshot and quick access to college services.</p>
         </div>
-      </div>
+        {profile && (
+          <div className="welcome-profile">
+            <span className="welcome-avatar">{user.name.slice(0, 1).toUpperCase()}</span>
+            <span>
+              <strong>{profile.rollNumber}</strong>
+              <small>{profile.branch?.code || "Student"} · Year {profile.year}</small>
+            </span>
+          </div>
+        )}
+      </section>
 
       {loading && (
         <div className="loading-state">
@@ -52,69 +62,72 @@ const StudentDashboard = () => {
       {error && <div className="form-error">{error}</div>}
 
       {profile && (
-        <div className="grid-cards">
-          <div className="stat-card">
-            <div className="stat-value">{profile.rollNumber}</div>
-            <div className="stat-label">Roll number</div>
+        <section className="portal-section">
+          <div className="portal-section-heading">
+            <h3>Academic overview</h3>
           </div>
-          <div className="stat-card">
-            <div className="stat-value">{profile.branch?.code}</div>
-            <div className="stat-label">Branch</div>
+          <div className="portal-stats student-stats">
+            <div className="portal-stat-card">
+              <span className="portal-stat-icon blue">♙</span>
+              <span className="portal-stat-value">{profile.rollNumber}</span>
+              <span className="portal-stat-label">Roll number</span>
+            </div>
+            <div className="portal-stat-card">
+              <span className="portal-stat-icon green">▦</span>
+              <span className="portal-stat-value">{profile.branch?.code || "—"}</span>
+              <span className="portal-stat-label">Program</span>
+            </div>
+            <div className="portal-stat-card">
+              <span className="portal-stat-icon purple">⌂</span>
+              <span className="portal-stat-value">Year {profile.year}</span>
+              <span className="portal-stat-label">Semester {profile.semester}</span>
+            </div>
+            {fee && (
+              <Link to="/student/fees" className="portal-stat-card">
+                <span className="portal-stat-icon orange">₹</span>
+                <span className="portal-stat-value">{`\u20B9${fee.balance.toLocaleString("en-IN")}`}</span>
+                <span className="portal-stat-label">Fee balance</span>
+              </Link>
+            )}
           </div>
-          <div className="stat-card">
-            <div className="stat-value">Year {profile.year}</div>
-            <div className="stat-label">Semester {profile.semester}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-value">{profile.section}</div>
-            <div className="stat-label">Section</div>
-          </div>
-          {fee && (
-            <Link to="/student/fees" className="stat-card">
-              <div className="stat-value" style={{ color: fee.balance > 0 ? "var(--danger, #c0392b)" : "inherit" }}>
-                {"\u20B9"}{fee.balance.toLocaleString("en-IN")}
-              </div>
-              <div className="stat-label">Fee balance</div>
-            </Link>
-          )}
-        </div>
+        </section>
       )}
 
-      <div className="grid-2">
-        <div className="card card-pad">
-          <h3 style={{ fontSize: 16, marginBottom: 14 }}>Latest notices</h3>
-          {notices.length === 0 && <p style={{ fontSize: 14 }}>No notices yet.</p>}
+      <section className="portal-section">
+        <div className="portal-section-heading">
+          <h3>Quick access</h3>
+        </div>
+        <div className="portal-quick-grid">
+          <Link to="/student/attendance" className="portal-quick-card"><span className="portal-stat-icon blue">✓</span><span>Attendance</span></Link>
+          <Link to="/student/timetable" className="portal-quick-card"><span className="portal-stat-icon green">▦</span><span>Timetable</span></Link>
+          <Link to="/student/subjects" className="portal-quick-card"><span className="portal-stat-icon purple">▤</span><span>Subjects</span></Link>
+          <Link to="/student/assignments" className="portal-quick-card"><span className="portal-stat-icon orange">✎</span><span>Assignments</span></Link>
+          <Link to="/student/exams" className="portal-quick-card"><span className="portal-stat-icon red">✓</span><span>Exams</span></Link>
+          <Link to="/student/results" className="portal-quick-card"><span className="portal-stat-icon blue">▥</span><span>Results</span></Link>
+          <Link to="/student/fees" className="portal-quick-card"><span className="portal-stat-icon green">₹</span><span>Fee details</span></Link>
+          <Link to="/student/materials" className="portal-quick-card"><span className="portal-stat-icon purple">▣</span><span>Study materials</span></Link>
+        </div>
+      </section>
+
+      <section className="portal-section">
+        <div className="portal-section-heading">
+          <h3>Latest notices</h3>
+          <Link to="/student/notices">View all</Link>
+        </div>
+        <div className="card notice-card">
+          {notices.length === 0 && <p className="portal-empty">No notices yet.</p>}
           {notices.map((n) => (
-            <div key={n._id} style={{ padding: "10px 0", borderBottom: "1px solid var(--paper-line)" }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{n.title}</div>
-              <div style={{ fontSize: 12.5, color: "var(--grey-500)" }}>
-                {new Date(n.createdAt).toLocaleDateString()}
+            <div key={n._id} className="portal-notice-row">
+              <span className="portal-notice-icon">▤</span>
+              <div className="portal-notice-content">
+                <strong>{n.title}</strong>
+                <small>{new Date(n.createdAt).toLocaleDateString()}</small>
               </div>
+              <span className="portal-notice-arrow" aria-hidden="true">›</span>
             </div>
           ))}
-          <Link to="/student/notices" style={{ fontSize: 13.5, display: "inline-block", marginTop: 10 }}>
-            View all notices &rarr;
-          </Link>
         </div>
-
-        <div className="card card-pad">
-          <h3 style={{ fontSize: 16, marginBottom: 14 }}>Quick links</h3>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <Link to="/student/materials" className="btn btn-secondary" style={{ justifyContent: "flex-start" }}>
-              Browse notes & PDFs
-            </Link>
-            <Link to="/student/subjects" className="btn btn-secondary" style={{ justifyContent: "flex-start" }}>
-              View my subjects
-            </Link>
-            <Link to="/student/faculty" className="btn btn-secondary" style={{ justifyContent: "flex-start" }}>
-              Find faculty contacts
-            </Link>
-            <Link to="/student/fees" className="btn btn-secondary" style={{ justifyContent: "flex-start" }}>
-              Fees &amp; receipts
-            </Link>
-          </div>
-        </div>
-      </div>
+      </section>
     </DashboardLayout>
   );
 };

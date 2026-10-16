@@ -4,13 +4,6 @@ import DashboardLayout from "../../layouts/DashboardLayout";
 import api, { apiErrorMessage } from "../../services/api";
 import { useToast } from "../../context/ToastContext";
 
-const Card = ({ label, value }) => (
-  <div className="card" style={{ padding: 20 }}>
-    <div style={{ fontSize: 26, fontWeight: 700, fontFamily: "var(--font-display)" }}>{value}</div>
-    <div style={{ color: "var(--grey-700)", fontSize: 13.5 }}>{label}</div>
-  </div>
-);
-
 const HodDashboard = () => {
   const [stats, setStats] = useState(null);
   const [overview, setOverview] = useState(null);
@@ -25,44 +18,115 @@ const HodDashboard = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (loading) return <DashboardLayout title="Dashboard"><div className="loading-state"><span className="spinner" /></div></DashboardLayout>;
-
   return (
     <DashboardLayout title="Dashboard">
-      <div className="page-header"><div><h2>Department Overview</h2><p>Your department only.</p></div></div>
+      <section className="portal-welcome">
+        <div>
+          <span className="portal-eyebrow">Department head portal</span>
+          <h2>Department overview</h2>
+          <p>Today’s attendance and the latest department snapshot.</p>
+        </div>
+        <Link to="/hod/attendance" className="btn btn-primary admin-report-button">Attendance</Link>
+      </section>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 16, marginBottom: 32 }}>
-        <Card label="Total Students" value={stats?.totalStudents ?? 0} />
-        <Card label="Total Faculty" value={stats?.totalFaculty ?? 0} />
-        <Card label="Total Subjects" value={stats?.totalSubjects ?? 0} />
-        <Card label="Total Sections" value={stats?.totalSections ?? 0} />
-        <Card label="Present Today" value={overview?.presentToday ?? 0} />
-        <Card label="Absent Today" value={overview?.absentToday ?? 0} />
-      </div>
+      {loading && <div className="loading-state"><span className="spinner" /></div>}
 
-      <div className="page-header">
-        <h3 style={{ margin: 0 }}>Students below {overview?.threshold ?? 75}% attendance</h3>
-        <Link to="/hod/attendance" className="btn btn-secondary btn-sm">View full list & download</Link>
-      </div>
-      <table className="data-table">
-        <thead><tr><th>Roll No</th><th>Name</th><th>Attendance</th></tr></thead>
-        <tbody>
-          {(overview?.lowAttendanceStudents || []).slice(0, 5).map((row) => (
-            <tr key={row.student._id}>
-              <td>{row.student.rollNumber}</td>
-              <td>{row.student.user?.name}</td>
-              <td style={{ color: "var(--danger, #c0392b)" }}>{row.percentage}%</td>
-            </tr>
-          ))}
-          {(!overview?.lowAttendanceStudents || overview.lowAttendanceStudents.length === 0) && (
-            <tr><td colSpan={3} style={{ textAlign: "center", padding: 20 }}>No students below the threshold.</td></tr>
-          )}
-        </tbody>
-      </table>
-      {overview?.lowAttendanceStudents?.length > 5 && (
-        <p style={{ fontSize: 13, color: "var(--grey-700)", marginTop: 8 }}>
-          Showing 5 of {overview.lowAttendanceStudents.length} — see the full list on the Attendance page.
-        </p>
+      {!loading && (
+        <>
+          <section className="portal-section">
+            <div className="portal-section-heading">
+              <h3>Department at a glance</h3>
+            </div>
+            <div className="portal-stats hod-stats">
+              <div className="portal-stat-card">
+                <span className="portal-stat-icon blue">♙</span>
+                <span className="portal-stat-value">{stats?.totalStudents ?? 0}</span>
+                <span className="portal-stat-label">Students</span>
+              </div>
+              <div className="portal-stat-card">
+                <span className="portal-stat-icon green">♧</span>
+                <span className="portal-stat-value">{stats?.totalFaculty ?? 0}</span>
+                <span className="portal-stat-label">Faculty</span>
+              </div>
+              <div className="portal-stat-card">
+                <span className="portal-stat-icon purple">▦</span>
+                <span className="portal-stat-value">{stats?.totalSubjects ?? 0}</span>
+                <span className="portal-stat-label">Subjects</span>
+              </div>
+              <div className="portal-stat-card">
+                <span className="portal-stat-icon orange">▤</span>
+                <span className="portal-stat-value">{stats?.totalSections ?? 0}</span>
+                <span className="portal-stat-label">Sections</span>
+              </div>
+            </div>
+          </section>
+
+          <section className="portal-section">
+            <div className="portal-section-heading">
+              <h3>Attendance today</h3>
+              <Link to="/hod/attendance">View all</Link>
+            </div>
+            <div className="portal-stats attendance-stats">
+              <div className="attendance-summary-card">
+                <span className="portal-stat-icon green">✓</span>
+                <div>
+                  <strong>{overview?.presentToday ?? 0}</strong>
+                  <span>Present</span>
+                </div>
+              </div>
+              <div className="attendance-summary-card">
+                <span className="portal-stat-icon red">×</span>
+                <div>
+                  <strong>{overview?.absentToday ?? 0}</strong>
+                  <span>Absent</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="portal-section">
+            <div className="portal-section-heading">
+              <h3>Students needing attention</h3>
+              <Link to="/hod/attendance">View all</Link>
+            </div>
+            <div className="card portal-list-card">
+              {(overview?.lowAttendanceStudents || []).slice(0, 5).map((row) => {
+                const percentage = Math.max(0, Math.min(100, Number(row.percentage) || 0));
+                return (
+                  <div key={row.student._id} className="hod-student-row">
+                    <span className="welcome-avatar">{(row.student.user?.name || row.student.rollNumber || "?").slice(0, 1).toUpperCase()}</span>
+                    <div className="hod-student-info">
+                      <strong>{row.student.user?.name || "Student"}</strong>
+                      <small>{row.student.rollNumber}</small>
+                    </div>
+                    <div className="hod-attendance-progress">
+                      <span className="hod-attendance-track"><span style={{ width: `${percentage}%` }} /></span>
+                      <strong>{percentage}%</strong>
+                    </div>
+                  </div>
+                );
+              })}
+              {(!overview?.lowAttendanceStudents || overview.lowAttendanceStudents.length === 0) && (
+                <p className="portal-empty">No students below the {overview?.threshold ?? 75}% attendance threshold.</p>
+              )}
+            </div>
+            {(overview?.lowAttendanceStudents?.length || 0) > 5 && (
+              <p className="portal-list-footnote">
+                Showing 5 of {overview.lowAttendanceStudents.length} students below the threshold.
+              </p>
+            )}
+          </section>
+
+          <section className="portal-section">
+            <div className="portal-section-heading"><h3>Quick actions</h3></div>
+            <div className="portal-quick-grid">
+              <Link to="/hod/attendance" className="portal-quick-card"><span className="portal-stat-icon blue">✓</span><span>Attendance</span></Link>
+              <Link to="/hod/students" className="portal-quick-card"><span className="portal-stat-icon green">♙</span><span>Students</span></Link>
+              <Link to="/hod/faculty" className="portal-quick-card"><span className="portal-stat-icon purple">♧</span><span>Faculty</span></Link>
+              <Link to="/hod/subjects" className="portal-quick-card"><span className="portal-stat-icon orange">▦</span><span>Subjects</span></Link>
+            </div>
+          </section>
+        </>
       )}
     </DashboardLayout>
   );
