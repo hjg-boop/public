@@ -2,6 +2,7 @@ const asyncHandler = require("express-async-handler");
 const Attendance = require("../models/Attendance");
 const Student = require("../models/Student");
 const Branch = require("../models/Branch");
+const Subject = require("../models/Subject");
 const CollegeSettings = require("../models/CollegeSettings");
 const TimetableSlot = require("../models/TimetableSlot");
 const { logActivity } = require("../utils/activity");
@@ -14,6 +15,98 @@ const lowAttendanceThreshold = async () => {
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const pad2 = (n) => String(n).padStart(2, "0");
+const isObjectId = (value) => /^[a-f\d]{24}$/i.test(String(value || ""));
+const attendanceError = (message, statusCode = 400) => Object.assign(new Error(message), { statusCode });
+
+const resolveBranch = (identifier) => {
+  const value = String(identifier || "").trim();
+  return isObjectId(value)
+    ? Branch.findById(value)
+    : Branch.findOne({ code: value.toUpperCase() });
+};
+
+const resolveSubject = (identifier, { branch, year, semester }) => {
+  const value = String(identifier || "").trim();
+  const filter = {
+    branch,
+    year: Number(year),
+    semester: Number(semester),
+  };
+  if (isObjectId(value)) filter._id = value;
+  else filter.subjectCode = value.toUpperCase();
+  return Subject.findOne(filter);
+};
+
+const resolveAttendanceSession = async ({ branchId, subjectId, year, semester, section, periodNumber, date }) => {
+  if (!branchId || !subjectId || !year || !semester || !section || !periodNumber || !date) {
+    throw attendanceError("branchId, year, semester, section, periodNumber, date and subjectId are required");
+  }
+
+  const parsedDate = String(date);
+  const dateStart = new Date(`${parsedDate}T00:00:00.000Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(parsedDate) || Number.isNaN(dateStart.getTime()) || dateStart.toISOString().slice(0, 10) !== parsedDate) {
+    throw attendanceError("date must be a valid YYYY-MM-DD date");
+  }
+
+  const yearNumber = Number(year);
+  const semesterNumber = Number(semester);
+  const period = Number(periodNumber);
+  if (!Number.isInteger(yearNumber) || !Number.isInteger(semesterNumber) || !Number.isInteger(period) || period < 1) {
+    throw attendanceError("Invalid year, semester or period number");
+  }
+
+  const branchDoc = await resolveBranch(branchId);
+  if (!branchDoc) throw attendanceError("Invalid branch");
+  const subjectDoc = await resolveSubject(subjectId, {
+    branch: branchDoc._id,
+    year: yearNumber,
+    semester: semesterNumber,
+  });
+  if (!subjectDoc) throw attendanceError("Invalid subject for this branch, year and semester");
+
+  const dateEnd = new Date(dateStart.getTime() + 24 * 60 * 60 * 1000);
+  return {
+    branch: branchDoc,
+    subject: subjectDoc,
+    year: yearNumber,
+    semester: semesterNumber,
+    section: String(section).trim().toUpperCase(),
+    periodNumber: period,
+    date: parsedDate,
+    dateStart,
+    dateEnd,
+    day: DAY_NAMES[dateStart.getUTCDay()],
+  };
+};
+
+const authorizeFacultyForSession = async (req, session) => {
+  const faculty = await getMyFacultyProfile(req);
+  if (!faculty) throw attendanceError("Faculty profile not found", 403);
+
+  const ownsAssignment = await facultyOwnsClass(faculty._id, {
+    subject: session.subject._id,
+    branch: session.branch._id,
+    year: session.year,
+    semester: session.semester,
+    section: session.section,
+  });
+  if (ownsAssignment) return faculty;
+
+  const slot = await TimetableSlot.findOne({
+    branch: session.branch._id,
+    year: session.year,
+    semester: session.semester,
+    section: session.section,
+    day: session.day,
+    periodNumber: session.periodNumber,
+    subject: session.subject._id,
+    faculty: faculty._id,
+  });
+  if (!slot || String(slot.faculty) !== String(faculty._id)) {
+    throw attendanceError("You are not assigned to teach this subject for this class", 403);
+  }
+  return faculty;
+};
 
 // @desc  Auto-detect the class the faculty should be taking attendance for
 //        RIGHT NOW, purely from their timetable - no subject/semester picker.
@@ -101,39 +194,124 @@ const getRoster = asyncHandler(async (req, res) => {
   res.json({ success: true, message: "Roster fetched", data: students });
 });
 
+// @desc  Fetch a saved attendance session and its roll-number status summary.
+// @route GET /api/attendance/session
+const getAttendanceSession = asyncHandler(async (req, res) => {
+  const session = await resolveAttendanceSession({
+    branchId: req.query.branchId,
+    subjectId: req.query.subjectId,
+    year: req.query.year,
+    semester: req.query.semester,
+    section: req.query.section,
+    periodNumber: req.query.periodNumber,
+    date: req.query.date,
+  });
+  await authorizeFacultyForSession(req, session);
+
+  const [students, attendance] = await Promise.all([
+    Student.find({
+      branch: session.branch._id,
+      year: session.year,
+      semester: session.semester,
+      section: session.section,
+    }).select("_id rollNumber").sort({ rollNumber: 1 }),
+    Attendance.findOne({
+      subject: session.subject._id,
+      branch: session.branch._id,
+      year: session.year,
+      semester: session.semester,
+      section: session.section,
+      periodNumber: session.periodNumber,
+      date: { $gte: session.dateStart, $lt: session.dateEnd },
+    }).select("records"),
+  ]);
+
+  const savedStatusByStudent = new Map(
+    (attendance?.records || []).map((record) => [String(record.student), record.status])
+  );
+  const records = attendance
+    ? students.map((student) => ({
+      rollNumber: student.rollNumber,
+      status: savedStatusByStudent.get(String(student._id)) === "absent" ? "Absent" : "Present",
+    }))
+    : [];
+  const absentees = records.filter((record) => record.status === "Absent").map((record) => record.rollNumber);
+  const absentCount = absentees.length;
+
+  res.json({
+    success: true,
+    message: "Attendance session fetched",
+    data: {
+      sessionExists: !!attendance,
+      date: session.date,
+      periodNumber: session.periodNumber,
+      totalStudents: students.length,
+      presentCount: attendance ? students.length - absentCount : 0,
+      absentCount,
+      absentees,
+      records,
+    },
+  });
+});
+
 // @desc  Mark/replace attendance for one class session. Faculty must be the
 //        assigned teacher for this exact subject+class.
 const markAttendance = asyncHandler(async (req, res) => {
   const { subject, branch, year, semester, section, date, periodNumber, records } = req.body;
-  if (!subject || !branch || !year || !semester || !date || !records?.length) {
+  if (!Array.isArray(records) || records.length === 0) {
     res.status(400);
-    throw new Error("subject, branch, year, semester, date and records are required");
+    throw new Error("At least one attendance record is required");
   }
 
-  // Attendance can only be taken/edited for TODAY. Since editing re-submits
-  // the same `date` the session was created with, this same check also
-  // enforces "faculty can change attendance within the same day" - once the
-  // calendar date rolls over, that date no longer equals "today" and any
-  // further edit attempt is rejected here.
-  if (new Date(date).toDateString() !== new Date().toDateString()) {
-    res.status(403);
-    throw new Error("Attendance can only be marked or edited on the same day it was taken");
+  const session = await resolveAttendanceSession({
+    branchId: branch,
+    subjectId: subject,
+    year,
+    semester,
+    section: section || "A",
+    periodNumber: periodNumber || 1,
+    date,
+  });
+  await authorizeFacultyForSession(req, session);
+
+  const studentIds = records.map((record) => String(record.student || ""));
+  if (studentIds.some((id) => !isObjectId(id)) || new Set(studentIds).size !== studentIds.length) {
+    res.status(400);
+    throw new Error("Attendance records must contain unique valid student IDs");
   }
 
-  const faculty = await getMyFacultyProfile(req);
-  if (faculty) {
-    const owns = await facultyOwnsClass(faculty._id, { subject, branch, year, semester, section: section || "A" });
-    if (!owns) { res.status(403); throw new Error("You are not assigned to teach this subject for this class"); }
+  const validStudents = await Student.find({
+    _id: { $in: studentIds },
+    branch: session.branch._id,
+    year: session.year,
+    semester: session.semester,
+    section: session.section,
+  }).select("_id");
+  if (validStudents.length !== studentIds.length) {
+    res.status(400);
+    throw new Error("Attendance includes a student outside this class");
   }
 
-  const key = { subject, date: new Date(date), periodNumber: periodNumber || 1 };
+  const key = {
+    subject: session.subject._id,
+    date: session.dateStart,
+    periodNumber: session.periodNumber,
+  };
   const attendance = await Attendance.findOneAndUpdate(
     key,
-    { ...key, branch, year, semester, section: section || "A", records, markedBy: req.user._id },
+    {
+      ...key,
+      branch: session.branch._id,
+      year: session.year,
+      semester: session.semester,
+      section: session.section,
+      records,
+      markedBy: req.user._id,
+    },
     { new: true, upsert: true, runValidators: true }
   );
-  await logActivity(req, { action: "Marked attendance", module: "attendance" });
-  res.status(201).json({ success: true, message: "Attendance saved", data: attendance });
+  await logActivity(req, { action: "Marked or updated attendance", module: "attendance" });
+  res.status(200).json({ success: true, message: "Attendance updated successfully.", data: attendance });
 });
 
 // @desc  A student's attendance, overall and per-subject.
@@ -240,4 +418,4 @@ const getDepartmentOverview = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { getCurrentClass, getRoster, markAttendance, getStudentAttendance, getDepartmentOverview };
+module.exports = { getCurrentClass, getRoster, getAttendanceSession, markAttendance, getStudentAttendance, getDepartmentOverview };

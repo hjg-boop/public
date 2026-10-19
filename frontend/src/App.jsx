@@ -4,6 +4,7 @@ import ProtectedRoute from "./components/ProtectedRoute";
 
 import Home from "./pages/Home";
 import About from "./pages/About";
+import CollegeInfo from "./pages/CollegeInfo";
 import FeeDetails from "./pages/FeeDetails";
 import Login from "./pages/Login";
 import ForgotPassword from "./pages/ForgotPassword";
@@ -86,6 +87,10 @@ function App() {
     <Routes>
       {/* Public pages - each is its own route */}
       <Route path="/" element={<Home />} />
+      <Route path="/academics" element={<CollegeInfo page="academics" />} />
+      <Route path="/placements" element={<CollegeInfo page="placements" />} />
+      <Route path="/campus-life" element={<CollegeInfo page="campus-life" />} />
+      <Route path="/achievements" element={<CollegeInfo page="achievements" />} />
       <Route path="/about" element={<About />} />
       <Route path="/fee-details" element={<FeeDetails />} />
       <Route path="/login" element={<Login />} />

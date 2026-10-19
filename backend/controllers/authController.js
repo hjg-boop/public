@@ -1,10 +1,13 @@
 const asyncHandler = require("express-async-handler");
 const crypto = require("crypto");
+const { OAuth2Client } = require("google-auth-library");
 const User = require("../models/User");
 const Student = require("../models/Student");
 const Faculty = require("../models/Faculty");
 const generateToken = require("../utils/generateToken");
 const { logActivity } = require("../utils/activity");
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // @desc    Login. The user does NOT choose a role - we look up the identifier
 //          (roll number OR email) and read the role from the database.
@@ -61,6 +64,77 @@ const login = asyncHandler(async (req, res) => {
   res.json({
     success: true,
     message: "Login successful",
+    data: {
+      token: generateToken(user._id, user.role),
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        phone: user.phone,
+        photo: user.photo,
+      },
+      profile,
+    },
+  });
+});
+
+// @desc    Sign in an existing portal user with a verified Google account.
+// @route   POST /api/auth/google
+// @access  Public
+const googleLogin = asyncHandler(async (req, res) => {
+  const { credential } = req.body;
+  if (!credential || typeof credential !== "string" || credential.length > 10000) {
+    res.status(400);
+    throw new Error("A valid Google credential is required");
+  }
+  if (!process.env.GOOGLE_CLIENT_ID) {
+    res.status(503);
+    throw new Error("Google sign-in is not configured. Contact the administrator.");
+  }
+
+  let payload;
+  try {
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    payload = ticket.getPayload();
+  } catch {
+    res.status(401);
+    throw new Error("Google sign-in could not be verified");
+  }
+
+  if (!payload?.email || payload.email_verified !== true) {
+    res.status(401);
+    throw new Error("Google must verify your email address before you can sign in");
+  }
+
+  const user = await User.findOne({ email: payload.email.toLowerCase() });
+  if (!user) {
+    res.status(403);
+    throw new Error("No portal account is registered with this Google email");
+  }
+  if (user.status === "inactive") {
+    res.status(403);
+    throw new Error("This account has been deactivated. Contact the administrator.");
+  }
+
+  user.lastLoginAt = new Date();
+  await user.save();
+
+  let profile = null;
+  if (user.role === "student") {
+    profile = await Student.findOne({ user: user._id }).populate("branch");
+  } else if (user.role === "faculty") {
+    profile = await Faculty.findOne({ user: user._id }).populate("department");
+  }
+
+  await logActivity(req, { user, action: "Logged in with Google", module: "auth" });
+
+  res.json({
+    success: true,
+    message: "Google login successful",
     data: {
       token: generateToken(user._id, user.role),
       user: {
@@ -198,4 +272,4 @@ const uploadMyPhoto = asyncHandler(async (req, res) => {
   res.json({ success: true, message: "Profile photo updated", data: user.photo });
 });
 
-module.exports = { login, getMe, changePassword, forgotPassword, resetPassword, uploadMyPhoto };
+module.exports = { login, googleLogin, getMe, changePassword, forgotPassword, resetPassword, uploadMyPhoto };

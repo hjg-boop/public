@@ -6,6 +6,10 @@ import { useAuth } from "../context/AuthContext";
 // Each public page is its own route (not a scroll anchor on one long page).
 const NAV_ITEMS = [
   { to: "/", label: "Home", end: true },
+  { to: "/academics", label: "Academics" },
+  { to: "/placements", label: "Placements" },
+  { to: "/campus-life", label: "Campus Life" },
+  { to: "/achievements", label: "Achievements" },
   { to: "/about", label: "About" },
   { to: "/fee-details", label: "Fee Details" },
 ];

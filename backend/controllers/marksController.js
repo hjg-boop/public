@@ -12,7 +12,7 @@ const getMarksSheet = asyncHandler(async (req, res) => {
 
   const faculty = await getMyFacultyProfile(req);
   if (faculty) {
-    const owns = await facultyOwnsClass(faculty._id, { subject, branch, year, semester, section: section || "A" });
+    const owns = await facultyOwnsClass(faculty._id, { subject, branch, year, semester, section: section || undefined });
     if (!owns) { res.status(403); throw new Error("You are not assigned to teach this subject for this class"); }
   }
 

@@ -94,7 +94,16 @@ const FacultyMarks = () => {
                   ))}
                   <td>{r.total}</td>
                   <td>{r.grade}</td>
-                  <td><button className="btn btn-secondary btn-sm" onClick={() => saveRow(r)} disabled={savingId === r.student._id}>Save</button></td>
+                  <td>
+                    <button
+                      className={`btn btn-secondary btn-sm${savingId === r.student._id ? " is-loading" : ""}`}
+                      onClick={() => saveRow(r)}
+                      disabled={savingId === r.student._id}
+                      aria-busy={savingId === r.student._id}
+                    >
+                      {savingId === r.student._id ? "Saving..." : "Save"}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

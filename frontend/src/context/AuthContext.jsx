@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import api, { apiErrorMessage } from "../services/api";
 
 const AuthContext = createContext(null);
@@ -43,6 +43,20 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const loginWithGoogle = useCallback(async (credential) => {
+    try {
+      const res = await api.post("/auth/google", { credential });
+      const { token, user: loggedInUser, profile: loggedInProfile } = res.data.data;
+      localStorage.setItem("cp_token", token);
+      localStorage.setItem("cp_user", JSON.stringify(loggedInUser));
+      setUser(loggedInUser);
+      setProfile(loggedInProfile);
+      return { success: true, user: loggedInUser };
+    } catch (err) {
+      return { success: false, message: apiErrorMessage(err) };
+    }
+  }, []);
+
   const logout = () => {
     localStorage.removeItem("cp_token");
     localStorage.removeItem("cp_user");
@@ -51,7 +65,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, setProfile, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, profile, setProfile, loading, login, loginWithGoogle, logout }}>
       {children}
     </AuthContext.Provider>
   );

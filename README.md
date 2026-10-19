@@ -58,6 +58,7 @@ MONGO_URI=mongodb+srv://<username>:<password>@<cluster-url>/college-portal?retry
 JWT_SECRET=some_long_random_string
 JWT_EXPIRES_IN=7d
 CLIENT_URL=http://localhost:5173
+GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
 FILE_STORAGE_PROVIDER=local
 ADMIN_NAME=College Admin
 ADMIN_EMAIL=admin@college.edu
@@ -78,7 +79,16 @@ cp frontend/.env.example frontend/.env
 
 ```
 VITE_API_URL=http://localhost:5000/api
+VITE_GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
 ```
+
+Google sign-in is optional. To enable it, create a Google OAuth **Web application**
+client ID in Google Cloud Console and add your frontend origin (for example,
+`http://localhost:5173`) to its authorized JavaScript origins. Set the same client
+ID as `GOOGLE_CLIENT_ID` in the backend environment and
+`VITE_GOOGLE_CLIENT_ID` in the frontend environment. Google sign-in only grants
+access to an existing, active portal account whose email matches the verified
+Google email; it does not create new accounts.
 
 ---
 
@@ -200,6 +210,7 @@ All responses follow `{ success, message, data }`. Protected routes require
 | Method | Route                          | Access                  |
 |--------|--------------------------------|--------------------------|
 | POST   | `/api/auth/login`              | Public (`identifier` = roll number for students, or email for faculty/admin) |
+| POST   | `/api/auth/google`             | Public (verified Google email must match an existing active portal account) |
 | POST   | `/api/students/bulk-import`     | Admin — upload .xlsx/.xls/.csv of students |
 | GET    | `/api/auth/me`                 | Authenticated            |
 | GET    | `/api/students`                | Admin, Faculty           |

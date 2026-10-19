@@ -49,7 +49,13 @@ const ResetPassword = () => {
               <label>Confirm new password</label>
               <input type="password" required minLength={6} value={confirm} onChange={(e) => setConfirm(e.target.value)} />
             </div>
-            <button className="btn btn-primary" type="submit" disabled={submitting} style={{ width: "100%" }}>
+            <button
+              className={`btn btn-primary${submitting ? " is-loading" : ""}`}
+              type="submit"
+              disabled={submitting}
+              aria-busy={submitting}
+              style={{ width: "100%" }}
+            >
               {submitting ? "Saving..." : "Reset password"}
             </button>
           </form>

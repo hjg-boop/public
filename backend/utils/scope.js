@@ -1,5 +1,6 @@
 const Branch = require("../models/Branch");
 const Faculty = require("../models/Faculty");
+const Subject = require("../models/Subject");
 const FacultyAssignment = require("../models/FacultyAssignment");
 
 /**
@@ -47,8 +48,29 @@ const getMyFacultyProfile = async (req) => {
 // subject for this exact branch/year/semester/section. This is the
 // ownership check behind "Faculty requests another faculty's class -> DENY".
 const facultyOwnsClass = async (facultyId, { subject, branch, year, semester, section }) => {
-  const assignment = await FacultyAssignment.findOne({ faculty: facultyId, subject, branch, year: Number(year), semester: Number(semester), section });
-  return !!assignment;
+  const query = {
+    faculty: facultyId,
+    subject,
+    branch,
+    year: Number(year),
+    semester: Number(semester),
+  };
+
+  if (section !== undefined && section !== null && section !== "") {
+    query.section = String(section).toUpperCase();
+  }
+
+  const assignment = await FacultyAssignment.findOne(query);
+  if (assignment) return true;
+
+  const subjectDoc = await Subject.findOne({ _id: subject, faculty: facultyId });
+  if (!subjectDoc) return false;
+
+  if (branch && String(subjectDoc.branch) !== String(branch)) return false;
+  if (year !== undefined && Number(subjectDoc.year) !== Number(year)) return false;
+  if (semester !== undefined && Number(subjectDoc.semester) !== Number(semester)) return false;
+
+  return true;
 };
 
 // Every (branch, year, semester, section, subject) combination this faculty

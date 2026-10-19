@@ -3,36 +3,45 @@ import DashboardLayout from "../../layouts/DashboardLayout";
 import api, { apiErrorMessage } from "../../services/api";
 import { useToast } from "../../context/ToastContext";
 
-// Faculty never pick a semester/section/subject by hand: the backend reads
-// their own timetable, matches it against the current day + clock time, and
-// tells us which class is active right now (GET /attendance/current-class).
-// Re-polling that endpoint is what makes the screen move on to the next
-// period on its own once the current one's time slot ends - nothing here
-// hard-codes a 55-minute duration, it just reflects whatever start/end times
-// the timetable actually has.
 const POLL_MS = 30000;
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+const todayDate = () => {
+  const today = new Date();
+  const local = new Date(today.getTime() - today.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+};
+
+const dayForDate = (date) => DAY_NAMES[new Date(`${date}T00:00:00.000Z`).getUTCDay()];
 const fmtSlot = (slot) =>
   slot ? `${slot.subject?.subjectCode} - ${slot.branch?.code} Y${slot.year} S${slot.semester} ${slot.section}` : "";
 
 const FacultyAttendance = () => {
   const [loading, setLoading] = useState(true);
-  const [current, setCurrent] = useState(null); // response from /attendance/current-class
-  const [manualSlot, setManualSlot] = useState(null); // a slot picked from today's list, overriding "live" mode
+  const [current, setCurrent] = useState(null);
+  const [timetableSlots, setTimetableSlots] = useState([]);
+  const [manualSlot, setManualSlot] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(todayDate);
   const [statusMap, setStatusMap] = useState({});
   const [students, setStudents] = useState([]);
+  const [sessionSummary, setSessionSummary] = useState(null);
   const [alreadyMarked, setAlreadyMarked] = useState(false);
   const [saving, setSaving] = useState(false);
   const [switchAvailable, setSwitchAvailable] = useState(false);
   const liveSlotIdRef = useRef(undefined);
   const { showToast } = useToast();
 
-  const applySlotData = (studentList, existingMap, marked) => {
+  const applySlotData = (studentList, existingMap, marked, summary = null) => {
     setStudents(studentList);
     setAlreadyMarked(marked);
+    setSessionSummary(summary || {
+      sessionExists: marked,
+      totalStudents: studentList.length,
+      absentees: studentList.filter((student) => existingMap[student._id] === "absent").map((student) => student.rollNumber),
+    });
     const next = {};
-    studentList.forEach((s) => {
-      next[s._id] = existingMap[s._id] || "present"; // unmarked defaults to present, tap to flip to absent
+    studentList.forEach((student) => {
+      next[student._id] = existingMap[student._id] || "present";
     });
     setStatusMap(next);
   };
@@ -43,23 +52,23 @@ const FacultyAttendance = () => {
       const data = res.data.data;
       setCurrent(data);
 
-      if (!manualSlot) {
-        // Auto mode: always reflect whichever class is active right now.
+      if (!manualSlot && selectedDate === todayDate()) {
         const newActiveId = data.active ? data.slot._id : null;
         if (newActiveId !== liveSlotIdRef.current) {
           liveSlotIdRef.current = newActiveId;
           if (data.active) {
             const existingMap = {};
-            data.students.forEach((s) => { if (s.existingStatus) existingMap[s._id] = s.existingStatus; });
+            data.students.forEach((student) => {
+              if (student.existingStatus) existingMap[student._id] = student.existingStatus;
+            });
             applySlotData(data.students, existingMap, data.alreadyMarked);
           } else {
             setStudents([]);
+            setSessionSummary(null);
           }
         }
         setSwitchAvailable(false);
-      } else {
-        // Reviewing a different period from today's list - don't yank it
-        // away, just let them know a (new) live period is available.
+      } else if (manualSlot) {
         setSwitchAvailable(data.active && data.slot._id !== manualSlot._id);
       }
     } catch (err) {
@@ -70,28 +79,54 @@ const FacultyAttendance = () => {
   };
 
   useEffect(() => {
+    api.get("/timetable/mine")
+      .then((res) => setTimetableSlots(res.data.data))
+      .catch((err) => showToast(apiErrorMessage(err), "error"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     fetchCurrent();
     const id = setInterval(() => fetchCurrent({ silent: true }), POLL_MS);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [manualSlot]);
+  }, [manualSlot, selectedDate]);
 
-  const viewSlot = async (slot) => {
+  const viewSlot = async (slot, date = selectedDate) => {
     setManualSlot(slot);
     setLoading(true);
     try {
-      const res = await api.get("/attendance/roster", {
-        params: { branch: slot.branch._id || slot.branch, year: slot.year, semester: slot.semester, section: slot.section },
-      });
-      // The roster endpoint doesn't carry existing marks for this specific
-      // subject+period, so cross-reference today's current-class payload
-      // when it happens to be the same slot, otherwise default everyone to
-      // present (first time marking that period today).
-      const existingMap = {};
-      if (current?.slot?._id === slot._id) {
-        current.students.forEach((s) => { if (s.existingStatus) existingMap[s._id] = s.existingStatus; });
-      }
-      applySlotData(res.data.data, existingMap, current?.slot?._id === slot._id ? current.alreadyMarked : false);
+      const params = {
+        branch: slot.branch._id || slot.branch,
+        year: slot.year,
+        semester: slot.semester,
+        section: slot.section,
+      };
+      const sessionParams = {
+        branchId: params.branch,
+        subjectId: slot.subject._id || slot.subject,
+        year: slot.year,
+        semester: slot.semester,
+        section: slot.section || "A",
+        periodNumber: slot.periodNumber,
+        date,
+      };
+      const [rosterResponse, sessionResponse] = await Promise.all([
+        api.get("/attendance/roster", { params }),
+        api.get("/attendance/session", { params: sessionParams }),
+      ]);
+      const roster = rosterResponse.data.data;
+      const summary = sessionResponse.data.data;
+      const byRollNumber = Object.fromEntries(
+        summary.records.map((record) => [record.rollNumber, record.status.toLowerCase()])
+      );
+      const existingMap = Object.fromEntries(
+        roster
+          .filter((student) => byRollNumber[student.rollNumber])
+          .map((student) => [student._id, byRollNumber[student.rollNumber]])
+      );
+      setSelectedDate(date);
+      applySlotData(roster, existingMap, summary.sessionExists, summary);
     } catch (err) {
       showToast(apiErrorMessage(err), "error");
     } finally {
@@ -99,34 +134,77 @@ const FacultyAttendance = () => {
     }
   };
 
+  const daySlots = selectedDate === todayDate()
+    ? (current?.todaySlots || [])
+    : timetableSlots.filter((slot) => slot.day === dayForDate(selectedDate));
+  const activeSlot = manualSlot || (selectedDate === todayDate() ? current?.slot : null);
+
+  const changeDate = (date) => {
+    setSelectedDate(date);
+    setSessionSummary(null);
+    if (date === todayDate()) {
+      setManualSlot(null);
+      liveSlotIdRef.current = undefined;
+      return;
+    }
+
+    const previousSlot = activeSlot;
+    const slotsForDate = timetableSlots.filter((slot) => slot.day === dayForDate(date));
+    const targetSlot = slotsForDate.find((slot) => slot.periodNumber === previousSlot?.periodNumber) || slotsForDate[0];
+    if (targetSlot) viewSlot(targetSlot, date);
+    else {
+      setManualSlot(null);
+      setStudents([]);
+      setStatusMap({});
+      setAlreadyMarked(false);
+    }
+  };
+
   const returnToLive = () => {
+    setSelectedDate(todayDate());
     setManualSlot(null);
-    liveSlotIdRef.current = undefined; // force a resync on the next fetch
+    liveSlotIdRef.current = undefined;
     fetchCurrent();
   };
 
   const toggle = (studentId) => {
-    setStatusMap((prev) => ({ ...prev, [studentId]: prev[studentId] === "present" ? "absent" : "present" }));
+    setStatusMap((prev) => ({
+      ...prev,
+      [studentId]: prev[studentId] === "present" ? "absent" : "present",
+    }));
   };
-
-  const activeSlot = manualSlot || current?.slot;
 
   const handleSave = async () => {
     if (!activeSlot) return;
     setSaving(true);
     try {
-      await api.post("/attendance/mark", {
-        subject: activeSlot.subject._id,
-        branch: activeSlot.branch._id,
+      await api.put("/attendance/update", {
+        subject: activeSlot.subject._id || activeSlot.subject,
+        branch: activeSlot.branch._id || activeSlot.branch,
         year: activeSlot.year,
         semester: activeSlot.semester,
         section: activeSlot.section,
-        date: new Date().toISOString().slice(0, 10),
+        date: selectedDate,
         periodNumber: activeSlot.periodNumber,
-        records: students.map((s) => ({ student: s._id, status: statusMap[s._id] || "absent" })),
+        records: students.map((student) => ({
+          student: student._id,
+          status: statusMap[student._id] || "absent",
+        })),
       });
-      showToast("Attendance saved", "success");
+      const absentees = students
+        .filter((student) => statusMap[student._id] === "absent")
+        .map((student) => student.rollNumber);
       setAlreadyMarked(true);
+      setSessionSummary({
+        sessionExists: true,
+        date: selectedDate,
+        periodNumber: activeSlot.periodNumber,
+        totalStudents: students.length,
+        presentCount: students.length - absentees.length,
+        absentCount: absentees.length,
+        absentees,
+      });
+      showToast("Attendance updated successfully.", "success");
     } catch (err) {
       showToast(apiErrorMessage(err), "error");
     } finally {
@@ -136,14 +214,14 @@ const FacultyAttendance = () => {
 
   if (loading) return <DashboardLayout title="Attendance"><div className="loading-state"><span className="spinner" /></div></DashboardLayout>;
 
-  const presentCount = students.filter((s) => statusMap[s._id] === "present").length;
+  const presentCount = students.filter((student) => statusMap[student._id] === "present").length;
 
   return (
     <DashboardLayout title="Attendance">
       <div className="page-header">
         <div>
           <h2>Attendance</h2>
-          <p>Automatically follows your timetable - no need to pick a class.</p>
+          <p>Choose a date and period to review or update attendance.</p>
         </div>
       </div>
 
@@ -154,42 +232,46 @@ const FacultyAttendance = () => {
         </div>
       )}
 
+      <div className="attendance-session-toolbar">
+        <label htmlFor="attendance-session-date">Attendance date</label>
+        <input id="attendance-session-date" type="date" value={selectedDate} max={todayDate()} onChange={(event) => changeDate(event.target.value)} />
+        {selectedDate === todayDate() && <span>Today’s live class is selected automatically.</span>}
+      </div>
+
       {!activeSlot ? (
-        <div className="card" style={{ padding: 24 }}>
-          <p style={{ margin: 0 }}>No class is active right now.</p>
-          {current?.todaySlots?.length > 0 && (
-            <>
-              <p style={{ fontSize: 13.5, color: "var(--grey-700)", marginTop: 12 }}>Today's periods - tap one to mark/review it:</p>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {current.todaySlots.map((slot) => (
-                  <button key={slot._id} className="btn btn-secondary btn-sm" onClick={() => viewSlot(slot)}>
-                    P{slot.periodNumber} - {fmtSlot(slot)} ({slot.startTime}-{slot.endTime})
-                  </button>
-                ))}
-              </div>
-            </>
+        <div className="card attendance-period-picker">
+          <p>{selectedDate === todayDate() ? "No class is active right now." : `Choose a period for ${dayForDate(selectedDate)} to review attendance.`}</p>
+          {daySlots.length > 0 ? (
+            <div className="attendance-period-tabs">
+              {daySlots.map((slot) => (
+                <button key={slot._id} className="btn btn-secondary btn-sm" onClick={() => viewSlot(slot)}>
+                  P{slot.periodNumber} · {fmtSlot(slot)}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="attendance-no-periods">No timetable periods are scheduled for this date.</p>
           )}
         </div>
       ) : (
         <>
-          <div className="card" style={{ padding: 16, marginBottom: 20, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+          <div className="card attendance-session-card">
             <div>
               <strong>{fmtSlot(activeSlot)}</strong>
-              <div style={{ fontSize: 13, color: "var(--grey-700)" }}>
-                Period {activeSlot.periodNumber} - {activeSlot.startTime}-{activeSlot.endTime}
-                {manualSlot && manualSlot._id !== current?.slot?._id ? " (reviewing - not the live period)" : ""}
-                {alreadyMarked ? " - already marked today, editing is fine" : ""}
+              <div className="attendance-session-meta">
+                Period {activeSlot.periodNumber} · {activeSlot.startTime}-{activeSlot.endTime} · {selectedDate}
+                {alreadyMarked ? " · saved session — editing is available" : " · not yet saved"}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              {manualSlot && <button className="btn btn-ghost btn-sm" onClick={returnToLive}>Back to live period</button>}
-              <span style={{ fontSize: 13.5 }}>{presentCount}/{students.length} present</span>
+            <div className="attendance-session-actions">
+              {selectedDate !== todayDate() && <button className="btn btn-ghost btn-sm" onClick={returnToLive}>Back to today</button>}
+              <span>{presentCount}/{students.length} present</span>
             </div>
           </div>
 
-          {current?.todaySlots?.length > 1 && (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-              {current.todaySlots.map((slot) => (
+          {daySlots.length > 1 && (
+            <div className="attendance-period-tabs attendance-period-tabs-active">
+              {daySlots.map((slot) => (
                 <button
                   key={slot._id}
                   className={`btn btn-sm ${activeSlot._id === slot._id ? "btn-primary" : "btn-ghost"}`}
@@ -201,31 +283,29 @@ const FacultyAttendance = () => {
             </div>
           )}
 
-          {/* Roll-number button grid: tap a student to flip present <-> absent. */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 12, marginBottom: 24 }}>
-            {students.map((s) => {
-              const present = statusMap[s._id] === "present";
+          {sessionSummary?.sessionExists && sessionSummary.absentCount > 0 && (
+            <div className="attendance-absent-summary" role="status">
+              <strong>{sessionSummary.absentCount} {sessionSummary.absentCount === 1 ? "student" : "students"} absent:</strong>
+              <span>{sessionSummary.absentees.join(", ")}</span>
+            </div>
+          )}
+          {sessionSummary?.sessionExists && sessionSummary.absentCount === 0 && (
+            <div className="attendance-all-present-summary" role="status">All students were marked present for this session.</div>
+          )}
+
+          <div className="attendance-student-grid">
+            {students.map((student) => {
+              const present = statusMap[student._id] === "present";
               return (
                 <button
-                  key={s._id}
-                  onClick={() => toggle(s._id)}
-                  title={s.user?.name}
-                  style={{
-                    padding: "14px 10px",
-                    borderRadius: 10,
-                    border: "none",
-                    cursor: "pointer",
-                    fontWeight: 700,
-                    fontSize: 14,
-                    letterSpacing: 0.3,
-                    color: "#fff",
-                    background: present ? "var(--ink)" : "var(--danger, #c0392b)",
-                    boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
-                    transition: "background 0.15s",
-                  }}
+                  key={student._id}
+                  className={`attendance-student-card ${present ? "is-present" : "is-absent"}`}
+                  onClick={() => toggle(student._id)}
+                  title={student.user?.name}
+                  aria-pressed={!present}
                 >
-                  <div>{s.rollNumber}</div>
-                  <div style={{ fontSize: 10.5, fontWeight: 500, opacity: 0.85, marginTop: 2 }}>{present ? "Present" : "Absent"}</div>
+                  <span>{student.rollNumber}</span>
+                  <small>{present ? "Present" : "Absent"}</small>
                 </button>
               );
             })}

@@ -48,7 +48,13 @@ const ForgotPassword = () => {
               <label>Email</label>
               <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@college.edu" />
             </div>
-            <button className="btn btn-primary" type="submit" disabled={submitting} style={{ width: "100%" }}>
+            <button
+              className={`btn btn-primary${submitting ? " is-loading" : ""}`}
+              type="submit"
+              disabled={submitting}
+              aria-busy={submitting}
+              style={{ width: "100%" }}
+            >
               {submitting ? "Sending..." : "Send reset link"}
             </button>
           </form>

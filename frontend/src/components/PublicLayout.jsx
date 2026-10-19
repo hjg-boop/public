@@ -16,6 +16,10 @@ const PublicLayout = ({ children }) => (
         </div>
         <div style={{ fontSize: 13.5, display: "flex", flexDirection: "column", gap: 6 }}>
           <Link to="/" style={{ color: "inherit" }}>Home</Link>
+          <Link to="/academics" style={{ color: "inherit" }}>Academics</Link>
+          <Link to="/placements" style={{ color: "inherit" }}>Placements</Link>
+          <Link to="/campus-life" style={{ color: "inherit" }}>Campus Life</Link>
+          <Link to="/achievements" style={{ color: "inherit" }}>Achievements</Link>
           <Link to="/about" style={{ color: "inherit" }}>About</Link>
           <Link to="/fee-details" style={{ color: "inherit" }}>Fee Details</Link>
           <Link to="/login" style={{ color: "inherit" }}>Portal Login</Link>
